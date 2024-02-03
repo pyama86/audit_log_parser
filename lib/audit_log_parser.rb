@@ -13,16 +13,14 @@ class AuditLogParser
   def self.parse_line(line, flatten: false)
     line = line.strip
 
-    if line !~ /type=\w+ msg=audit\([\d.:]+\): */
-      raise Error, "Invalid audit log header: #{line.inspect}"
-    end
+    raise Error, "Invalid audit log header: #{line.inspect}" if line !~ /type=\w+ msg=audit\([\d.:]+\): */
 
     header, body = line.split(/\): */, 2)
     header << ')'
     header.sub!(/: *\z/, '')
     header = parse_header(header)
     body = parse_body(body.strip)
-    result = {'header' => header, 'body' => body}
+    result = { 'header' => header, 'body' => body }
     flatten ? flatten_hash(result) : result
   end
 
@@ -68,24 +66,31 @@ class AuditLogParser
         nest = ss.scan_until(/'/)
         nest.chomp!("'")
         value = parse_body(nest)
+      when '{'
+        nest = ss.scan_until(/\}/)
+        nest.chomp!('}')
+        value = parse_body(nest)
       else
-        value << ss.scan_until(/( |\z)/)
+        value << ss.scan_until(/( |\z|(SADDR))/)
+
+        if value.end_with?('SADDR')
+          value.chomp!('SADDR')
+          ss.pos -= 5
+        end
         value.chomp!(' ')
       end
 
       result[key] = value
     end
 
-    unless ss.rest.empty?
-      raise "must not happen: #{body}"
-    end
+    raise "must not happen: #{body}" unless ss.rest.empty?
 
     result
   end
   private_class_method :parse_body
 
   def self.flatten_hash(h)
-    h.flat_map {|key, value|
+    h.flat_map do |key, value|
       if value.is_a?(Hash)
         flatten_hash(value).map do |sub_key, sub_value|
           ["#{key}_#{sub_key}", sub_value]
@@ -93,7 +98,7 @@ class AuditLogParser
       else
         [[key, value]]
       end
-    }.to_h
+    end.to_h
   end
   private_class_method :flatten_hash
 end
